@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>数式描画ツール（LaTeX入力 & ボタン生成）</title>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#121834; --muted:#9fb0ff; --text:#e9ecff; --btn:#1e2959; --btnh:#2a3879;
+    }
+    [data-theme="light"]{ --bg:#f6f8ff; --card:#ffffff; --muted:#5264b8; --text:#0f172a; --btn:#e7eeff; --btnh:#d9e4ff; }
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,"Hiragino Kaku Gothic ProN","Noto Sans JP"}
+    .wrap{max-width:980px;margin:40px auto;padding:0 16px}
+    h1{font-size:clamp(20px,4vw,30px);margin:0 0 12px}
+    .card{background:color-mix(in oklab, var(--card) 92%, transparent);border:1px solid color-mix(in oklab, var(--text) 12%, transparent);border-radius:14px;padding:18px;margin:14px 0}
+    textarea{width:100%;min-height:140px;border-radius:10px;background:color-mix(in oklab, var(--bg) 92%, white 0%);color:var(--text);border:1px solid color-mix(in oklab, var(--text) 20%, transparent);padding:10px;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    .btn{appearance:none;border:0;border-radius:10px;padding:8px 12px;background:var(--btn);color:var(--text);font-size:14px;cursor:pointer}
+    .btn:hover{background:var(--btnh)}
+    .toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+    .muted{color:var(--muted);font-size:13px}
+    .actionbar{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .pill{padding:6px 10px;border-radius:999px;border:1px solid color-mix(in oklab, var(--text) 18%, transparent);background:transparent}
+    .kbd{display:inline-block;padding:1px 6px;border-radius:6px;border:1px solid color-mix(in oklab, var(--text) 25%, transparent);font-size:12px}
+    .output{background:color-mix(in oklab, var(--bg) 92%, white 0%);padding:10px;border-radius:10px;overflow:auto;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    .hist{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{border:1px solid color-mix(in oklab, var(--text) 18%, transparent);padding:6px 8px;border-radius:999px;background:transparent;cursor:pointer}
+    .chip:hover{background:color-mix(in oklab, var(--text) 10%, transparent)}
+  </style>
+  <script>
+    // MathJax 設定（SVG 出力／ローカルキャッシュ）
+    window.MathJax = { tex:{inlineMath:[["$","$"],["\\(","\\)"]]}, svg:{fontCache:'local'} };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="row" style="justify-content:space-between">
+      <h1>数式描画ツール</h1>
+      <div class="row">
+        <button id="themeToggle" class="btn">🌗 テーマ切替</button>
+        <a class="btn" href="index.html">← PDFツールへ</a>
+      </div>
+    </div>
+    <p class="muted">LaTeXコードを入力するか、下のボタンで数式を追加。リアルタイム描画・コピー・画像保存・URL共有・履歴復元に対応します。</p>
+
+    <div class="card">
+      <div class="toolbar" id="toolbar"></div>
+      <div class="row">
+        <label class="pill"><input type="checkbox" id="modeDisplay" checked style="accent-color:#6aa9ff"/> $$ ディスプレイ表示</label>
+        <span class="muted">選択範囲を分数・ルート・括弧で<em>包む</em>挿入に対応。ショートカット：<span class="kbd">⌘/Ctrl</span>+<span class="kbd">Enter</span>で描画、<span class="kbd">⌘/Ctrl</span>+<span class="kbd">C</span>でコピー。</span>
+      </div>
+      <textarea id="input" placeholder="ここにLaTeX数式コードを入力（例：\\int_0^1 x^2\\,dx = 1/3）"></textarea>
+      <div class="actionbar">
+        <button id="render" class="btn">描画</button>
+        <button id="copy" class="btn">TeXコードをコピー</button>
+        <button id="saveSvg" class="btn">SVG保存</button>
+        <button id="savePng" class="btn">PNG保存</button>
+        <button id="shareUrl" class="btn">URL共有リンク作成</button>
+        <button id="clear" class="btn">クリア</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>プレビュー</h3>
+      <div id="preview" class="output">（ここに数式が表示されます）</div>
+    </div>
+
+    <div class="card">
+      <h3>コード出力</h3>
+      <div id="output" class="output"></div>
+    </div>
+
+    <div class="card">
+      <h3>最近の数式（ローカル保存）</h3>
+      <div id="history" class="hist"></div>
+    </div>
+  </div>
+
+  <script>
+    // ===== ツールバー定義（必要に応じて追加してOK）
+    const KEYS = [
+      {label:'∫', ins:'\\int'}, {label:'∑', ins:'\\sum'}, {label:'∏', ins:'\\prod'},
+      {label:'分数', ins:'\\frac{}{}'}, {label:'√', ins:'\\sqrt{}'},
+      {label:'微分 ∂', ins:'\\partial'}, {label:'∇', ins:'\\nabla'}, {label:'∞', ins:'\\infty'},
+      {label:'lim', ins:'\\lim'}, {label:'→', ins:'\\rightarrow'},
+      {label:'^ 上つき', ins:'^{ }'}, {label:'_ 下つき', ins:'_{ }'},
+      {label:'( )', ins:'\\left(  \\right)'}, {label:'[ ]', ins:'\\left[  \\right]'}, {label:'{ }', ins:'\\left\\{  \\right\\}'},
+      {label:'| |', ins:'\\left|  \\right|'}, {label:'〈 〉', ins:'\\langle  \\rangle'},
+      {label:'行列', ins:'\\begin{bmatrix}  &  \\  &  \\end{bmatrix}'},
+      {label:'cases', ins:'\\begin{cases}  , & \\\\  , &  \\end{cases}'},
+      {label:'θ', ins:'\\theta'}, {label:'λ', ins:'\\lambda'}, {label:'μ', ins:'\\mu'}, {label:'ν', ins:'\\nu'}, {label:'π', ins:'\\pi'},
+      {label:'ℝ', ins:'\\mathbb{R}'}, {label:'ℕ', ins:'\\mathbb{N}'}, {label:'ℤ', ins:'\\mathbb{Z}'},
+      {label:'微分 d/dx', ins:'\\frac{d}{dx} '}, {label:'偏微分 ∂/∂x', ins:'\\frac{\\partial}{\\partial x} '},
+      {label:'積分_上下限', ins:'\\int_{ }^{ } '}, {label:'Σ_上下限', ins:'\\sum_{ }^{ } '},
+    ];
+
+    // ===== 要素取得
+    const toolbar = document.getElementById('toolbar');
+    const input = document.getElementById('input');
+    const preview = document.getElementById('preview');
+    const output = document.getElementById('output');
+    const modeDisplay = document.getElementById('modeDisplay');
+    const historyEl = document.getElementById('history');
+
+    // ===== ツールバー生成
+    toolbar.innerHTML='';
+    for(const k of KEYS){
+      const b=document.createElement('button'); b.className='btn'; b.textContent=k.label; b.dataset.insert=k.ins; toolbar.appendChild(b);
+    }
+
+    // ===== 選択範囲を"包む"挿入
+    toolbar.addEventListener('click', (e)=>{
+      const btn = e.target.closest('button.btn'); if(!btn) return;
+      const tpl = btn.dataset.insert;
+      const s=input.selectionStart, epos=input.selectionEnd; const sel=input.value.slice(s, epos);
+      let inserted = tpl;
+      if(tpl==='\\frac{}{}') inserted = `\\frac{${sel||' '}}{ }`;
+      else if(tpl==='\\sqrt{}') inserted = `\\sqrt{${sel||' '}}`;
+      else if(tpl==='^{ }') inserted = `{${sel||''}}^{ }`;
+      else if(tpl==='_{ }') inserted = `{${sel||''}}_{ }`;
+      else if(tpl==='\\left(  \\right)') inserted = `\\left(${sel||' '}\\right)`;
+      else if(tpl==='\\left[  \\right]') inserted = `\\left[${sel||' '}\\right]`;
+      else if(tpl==='\\left\\{  \\right\\}') inserted = `\\left\\{${sel||' '}\\right\\}`;
+      else if(tpl==='\\left|  \\right|') inserted = `\\left|${sel||' '}\\right|`;
+      else if(tpl==='\\langle  \\rangle') inserted = `\\langle ${sel||' '} \\rangle`;
+      else if(tpl==='\\int_{ }^{ } ') inserted = `\\int_{ }^{ } ${sel||''}\\,`;
+      const newVal = input.value.slice(0,s) + inserted + input.value.slice(epos);
+      input.value = newVal; const caret = s + inserted.length; input.focus(); input.selectionStart = input.selectionEnd = caret;
+      renderMath();
+    });
+
+    // ===== 自動描画 + 出力
+    function renderMath(){
+      const code = input.value;
+      const body = modeDisplay.checked ? `$$${code}$$` : `\\(${code}\\)`;
+      preview.innerHTML = body;
+      MathJax.typesetPromise([preview]);
+      output.textContent = code;
+      saveHistory(code);
+    }
+    input.addEventListener('input', renderMath);
+    document.getElementById('render').addEventListener('click', renderMath);
+
+    // ===== コピー
+    document.getElementById('copy').addEventListener('click',()=>{
+      navigator.clipboard.writeText(input.value).then(()=>{ toast('TeXコードをコピーしました'); });
+    });
+
+    // ===== 画像保存（SVG / PNG）
+    async function getSVGString(){
+      await MathJax.typesetPromise([preview]);
+      const svg = preview.querySelector('svg');
+      return svg ? svg.outerHTML : null;
+    }
+    document.getElementById('saveSvg').addEventListener('click', async()=>{
+      const svg = await getSVGString(); if(!svg) return;
+      const blob = new Blob([svg], {type:'image/svg+xml'});
+      downloadBlob(blob, 'formula.svg');
+    });
+    document.getElementById('savePng').addEventListener('click', async()=>{
+      const svg = await getSVGString(); if(!svg) return;
+      const img = new Image();
+      const svgBlob = new Blob([svg], {type:'image/svg+xml'});
+      const url = URL.createObjectURL(svgBlob);
+      img.onload = ()=>{
+        const scale = 2; // 2x解像度
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale; canvas.height = img.height*scale;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(scale,0,0,scale,0,0);
+        ctx.drawImage(img,0,0);
+        canvas.toBlob(b=>{ if(b) downloadBlob(b,'formula.png'); URL.revokeObjectURL(url); }, 'image/png');
+      };
+      img.src = url;
+    });
+
+    // ===== URL 共有（ハッシュにエンコード）
+    function encodeHash(str){ return '#q=' + encodeURIComponent(str); }
+    function decodeHash(){ const m=location.hash.match(/^#q=(.*)$/); return m? decodeURIComponent(m[1]) : ''; }
+    document.getElementById('shareUrl').addEventListener('click',()=>{
+      const link = location.origin + location.pathname + encodeHash(input.value);
+      navigator.clipboard.writeText(link).then(()=> toast('共有URLをコピーしました'));
+      history.replaceState(null,'', encodeHash(input.value));
+    });
+    // ハッシュからの復元
+    const q = decodeHash(); if(q){ input.value=q; renderMath(); }
+
+    // ===== 履歴（localStorage）
+    const KEY='math-history-v1';
+    function loadHistory(){ try{ return JSON.parse(localStorage.getItem(KEY)||'[]'); }catch{return []} }
+    function saveHistoryItem(code){
+      const list = loadHistory().filter(x=>x!==code); // 重複削除
+      list.unshift(code); while(list.length>15) list.pop();
+      localStorage.setItem(KEY, JSON.stringify(list));
+    }
+    function saveHistory(code){ if(!code||!code.trim()) return; saveHistoryItem(code); renderHistory(); }
+    function renderHistory(){
+      const list = loadHistory(); historyEl.innerHTML='';
+      for(const s of list){ const b=document.createElement('button'); b.className='chip'; b.textContent = s.length>32 ? s.slice(0,32)+'…' : s; b.title=s; b.addEventListener('click',()=>{ input.value=s; renderMath(); }); historyEl.appendChild(b); }
+    }
+    renderHistory();
+
+    // ===== クリア
+    document.getElementById('clear').addEventListener('click',()=>{
+      input.value=''; preview.textContent='（ここに数式が表示されます）'; output.textContent=''; toast('クリアしました');
+    });
+
+    // ===== テーマ切替（保存）
+    const themeToggle = document.getElementById('themeToggle');
+    function setTheme(t){ document.documentElement.setAttribute('data-theme', t); localStorage.setItem('theme', t); }
+    const t0 = localStorage.getItem('theme'); if(t0) setTheme(t0);
+    themeToggle.addEventListener('click', ()=>{ const cur = document.documentElement.getAttribute('data-theme')||'dark'; setTheme(cur==='dark'?'light':'dark'); });
+
+    // ===== 共通 util
+    function downloadBlob(blob, filename){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000); }
+    function toast(msg){
+      const d=document.createElement('div'); d.textContent=msg; d.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0009;color:#fff;padding:8px 12px;border-radius:10px;z-index:9999';
+      document.body.appendChild(d); setTimeout(()=>d.remove(),1500);
+    }
+
+    // ===== ショートカット
+    document.addEventListener('keydown', (ev)=>{
+      if((ev.metaKey||ev.ctrlKey) && ev.key==='Enter'){ ev.preventDefault(); renderMath(); }
+      if((ev.metaKey||ev.ctrlKey) && ev.key.toLowerCase()==='c'){ if(document.activeElement===input){ ev.preventDefault(); navigator.clipboard.writeText(input.value).then(()=>toast('TeXコードをコピーしました')); } }
+    });
+  </script>
+</body>
+</html>
